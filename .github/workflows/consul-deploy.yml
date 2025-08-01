@@ -89,9 +89,25 @@ jobs:
         run: |
           kubectl apply -f consul-deployment/api-gateway/gateway-config.yaml
 
-      - name: Deploy Proxy Defaults
+      - name: Deploy Proxy Defaults (with retry on webhook error)
         run: |
-          kubectl apply -f consul-deployment/service-mesh/proxy-defaults.yaml
+          # Retry up to 10 times if webhook is not ready (connect: connection refused)
+          for i in {1..10}; do
+            kubectl apply -f consul-deployment/service-mesh/proxy-defaults.yaml && break
+            STATUS=$?
+            # Check for webhook connection refused error
+            if kubectl apply -f consul-deployment/service-mesh/proxy-defaults.yaml 2>&1 | grep -q 'connect: connection refused'; then
+              echo "Consul webhook not ready, retrying in 10s... ($i/10)"
+              sleep 10
+            else
+              echo "kubectl apply failed with error other than webhook connection refused."
+              exit $STATUS
+            fi
+            if [ $i -eq 10 ]; then
+              echo "Failed to apply proxy-defaults after multiple retries. Exiting."
+              exit 1
+            fi
+          done
 
       - name: Deploy Service Intentions
         run: |
