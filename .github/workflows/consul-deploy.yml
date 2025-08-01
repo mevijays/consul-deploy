@@ -42,9 +42,24 @@ jobs:
           kubectl apply -f consul-deployment/storage/local-path-provisioner.yaml
           kubectl rollout status deployment/local-path-provisioner -n local-path-storage --timeout=180s
 
-      - name: Deploy cert-manager config (issuers, CA)
+      - name: Deploy cert-manager config (issuers, CA) with retry on webhook error
         run: |
-          kubectl apply -f consul-deployment/certificates/cert-manager-config.yaml
+          # Retry up to 10 times if cert-manager webhook is not ready (x509: certificate signed by unknown authority)
+          for i in {1..10}; do
+            kubectl apply -f consul-deployment/certificates/cert-manager-config.yaml && break
+            STATUS=$?
+            if kubectl apply -f consul-deployment/certificates/cert-manager-config.yaml 2>&1 | grep -q 'x509: certificate signed by unknown authority'; then
+              echo "cert-manager webhook not ready, retrying in 10s... ($i/10)"
+              sleep 10
+            else
+              echo "kubectl apply failed with error other than cert-manager webhook x509 error."
+              exit $STATUS
+            fi
+            if [ $i -eq 10 ]; then
+              echo "Failed to apply cert-manager config after multiple retries. Exiting."
+              exit 1
+            fi
+          done
           kubectl get clusterissuer
           kubectl get cert -A
 
