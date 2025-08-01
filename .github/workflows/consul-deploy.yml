@@ -48,6 +48,23 @@ jobs:
           kubectl get clusterissuer
           kubectl get cert -A
 
+      - name: Wait for all cert-manager Certificates to be Ready
+        run: |
+          # Wait up to 5 minutes for all cert-manager Certificates in all namespaces to be Ready
+          for i in {1..30}; do
+            NOT_READY=$(kubectl get cert --all-namespaces -o json | jq -r '.items[] | select(.status.conditions[]? | select(.type=="Ready" and .status!="True")) | .metadata.namespace + "/" + .metadata.name')
+            if [ -z "$NOT_READY" ]; then
+              echo "All certificates are Ready."
+              exit 0
+            else
+              echo "Waiting for certificates to be Ready:"
+              echo "$NOT_READY"
+              sleep 10
+            fi
+          done
+          echo "Timeout waiting for all certificates to be Ready!" >&2
+          exit 1
+
       - name: Copy CA secret to consul namespace
         run: |
           kubectl get secret ca-key-pair -n cert-manager -o yaml | sed 's/namespace: cert-manager/namespace: consul/' | kubectl apply -f -
