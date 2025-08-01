@@ -1,0 +1,96 @@
+name: Consul Full Undeploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  undeploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Set up Kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG_DATA }}
+
+      - name: Delete Demo Applications
+        run: |
+          kubectl delete -f consul-deployment/demo-apps/demo-app-with-mesh.yaml --ignore-not-found
+          kubectl delete -f consul-deployment/demo-apps/demo2-app-with-mesh.yaml --ignore-not-found
+
+      - name: Delete Service Intentions
+        run: |
+          kubectl delete -f consul-deployment/service-mesh/service-intentions.yaml --ignore-not-found
+
+      - name: Delete Proxy Defaults (with retry on webhook error)
+        run: |
+          for i in {1..10}; do
+            kubectl delete -f consul-deployment/service-mesh/proxy-defaults.yaml --ignore-not-found && break
+            STATUS=$?
+            if kubectl delete -f consul-deployment/service-mesh/proxy-defaults.yaml 2>&1 | grep -q 'connect: connection refused'; then
+              echo "Consul webhook not ready, retrying in 10s... ($i/10)"
+              sleep 10
+            else
+              echo "kubectl delete failed with error other than webhook connection refused."
+              exit $STATUS
+            fi
+            if [ $i -eq 10 ]; then
+              echo "Failed to delete proxy-defaults after multiple retries. Exiting."
+              exit 1
+            fi
+          done
+
+      - name: Delete API Gateway
+        run: |
+          kubectl delete -f consul-deployment/api-gateway/gateway-config.yaml --ignore-not-found
+
+      - name: Delete API Gateway certificate
+        run: |
+          kubectl delete -f consul-deployment/certificates/api-gateway-cert.yaml --ignore-not-found
+
+      - name: Uninstall Consul via Helm
+        run: |
+          helm uninstall consul -n consul || echo "Consul release not found."
+          kubectl delete ns consul --ignore-not-found
+
+      - name: Delete CA secret from consul namespace
+        run: |
+          kubectl delete secret ca-key-pair -n consul --ignore-not-found
+
+      - name: Delete cert-manager config (issuers, CA)
+        run: |
+          kubectl delete -f consul-deployment/certificates/cert-manager-config.yaml --ignore-not-found
+
+      - name: Delete local-path-provisioner
+        run: |
+          kubectl delete -f consul-deployment/storage/local-path-provisioner.yaml --ignore-not-found
+          kubectl delete ns local-path-storage --ignore-not-found
+
+      - name: Delete MetalLB IP pool and L2Advertisement
+        run: |
+          kubectl delete -f metallb/apply.yaml --ignore-not-found
+
+      - name: Uninstall MetalLB
+        run: |
+          kubectl delete -f https://raw.githubusercontent.com/metallb/metallb/v0.15.2/config/manifests/metallb-native.yaml --ignore-not-found
+          kubectl delete ns metallb-system --ignore-not-found
+
+      - name: Uninstall cert-manager
+        run: |
+          kubectl delete -f https://github.com/cert-manager/cert-manager/releases/download/v1.18.2/cert-manager.yaml --ignore-not-found
+          kubectl delete ns cert-manager --ignore-not-found
+
+      - name: Show remaining relevant namespaces and resources
+        run: |
+          kubectl get ns
+          kubectl get pods --all-namespaces
+          kubectl get svc --all-namespaces
