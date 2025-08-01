@@ -65,9 +65,14 @@ jobs:
           echo "Timeout waiting for all certificates to be Ready!" >&2
           exit 1
 
-      - name: Copy CA secret to consul namespace
+      - name: Copy CA secret to consul namespace (if not present)
         run: |
-          kubectl get secret ca-key-pair -n cert-manager -o yaml | sed 's/namespace: cert-manager/namespace: consul/' | kubectl apply -f -
+          if kubectl get secret ca-key-pair -n consul >/dev/null 2>&1; then
+            echo "ca-key-pair secret already exists in consul namespace. Skipping copy."
+          else
+            kubectl get secret ca-key-pair -n cert-manager -o yaml | sed 's/namespace: cert-manager/namespace: consul/' | kubectl apply -f -
+            echo "ca-key-pair secret copied to consul namespace."
+          fi
 
       - name: Deploy Consul via Helm
         run: |
