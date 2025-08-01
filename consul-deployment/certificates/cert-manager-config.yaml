@@ -1,0 +1,42 @@
+---
+# Create consul namespace for certificates
+apiVersion: v1
+kind: Namespace
+metadata:
+  creationTimestamp: null
+  name: consul
+---
+# Cluster-wide self-signed issuer. Used to bootstrap a root CA for the cluster.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+# Certificate resource to generate a self-signed CA certificate and key in the cert-manager namespace.
+# This uses the selfsigned-issuer ClusterIssuer above and stores the CA in the ca-key-pair secret.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ca-root
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: consul-ca.selfsigned
+  secretName: ca-key-pair
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+---
+# ClusterIssuer for cluster-wide certificate signing.
+# This ClusterIssuer is referenced by Consul and other workloads for issuing TLS certificates.
+# It uses the ca-key-pair secret, which must be present in the cert-manager namespace.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: ca-issuer
+  namespace: cert-manager
+spec:
+  ca:
+    secretName: ca-key-pair

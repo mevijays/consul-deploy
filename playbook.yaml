@@ -1,0 +1,164 @@
+---
+- name: Prepare hosts for RKE installation
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    ansible_user: vijay
+    ansible_password: changeme
+    ansible_become_password: changeme
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+    
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install required packages
+      apt:
+        name:
+          - curl
+          - qemu-guest-agent
+          - vim
+          - wget
+          - net-tools
+        state: present
+        update_cache: true
+      when: ansible_os_family == "Debian"
+
+    - name: Start and enable QEMU guest agent
+      systemd:
+        name: qemu-guest-agent
+        state: started
+        enabled: true
+
+    - name: Install Docker using Rancher installation script
+      shell: curl https://releases.rancher.com/install-docker/20.10.sh | sh
+      args:
+        creates: /usr/bin/docker
+      register: docker_install_result
+
+    - name: Display Docker installation result
+      debug:
+        msg: "Docker installation completed: {{ docker_install_result.rc == 0 }}"
+      when: docker_install_result is defined
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: true
+
+    - name: Configure Docker daemon
+      copy:
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "10m",
+              "max-file": "3"
+            },
+            "storage-driver": "overlay2"
+          }
+        dest: /etc/docker/daemon.json
+        owner: root
+        group: root
+        mode: '0644'
+      notify:
+        - restart docker
+
+    - name: Disable swap permanently
+      replace:
+        path: /etc/fstab
+        regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
+        replace: '# \1'
+      notify:
+        - disable swap
+
+    - name: Disable swap immediately
+      command: swapoff -a
+      changed_when: false
+
+    - name: Load kernel modules for Kubernetes
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - br_netfilter
+        - overlay
+
+    - name: Make kernel modules persistent
+      copy:
+        content: |
+          br_netfilter
+          overlay
+        dest: /etc/modules-load.d/kubernetes.conf
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Set sysctl parameters for Kubernetes
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: true
+        sysctl_file: /etc/sysctl.d/kubernetes.conf
+      loop:
+        - { name: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+        - { name: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+        - { name: 'net.ipv4.ip_forward', value: '1' }
+
+    - name: Create /opt/rke directory
+      file:
+        path: /opt/rke
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Verify Docker installation
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Display Docker version
+      debug:
+        msg: "Docker installed: {{ docker_version.stdout }}"
+
+    - name: Verify QEMU guest agent status
+      command: systemctl is-active qemu-guest-agent
+      register: qemu_status
+      changed_when: false
+
+    - name: Display QEMU guest agent status
+      debug:
+        msg: "QEMU Guest Agent status: {{ qemu_status.stdout }}"
+
+    - name: Test Docker functionality
+      command: docker run --rm hello-world
+      register: docker_test
+      changed_when: false
+      become_user: "{{ ansible_user }}"
+
+    - name: Display Docker test result
+      debug:
+        msg: "Docker test successful"
+      when: docker_test.rc == 0
+
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted
+
+    - name: disable swap
+      command: swapoff -a

@@ -1,0 +1,49 @@
+global:
+  datacenter: dc1
+  tls:
+    enabled: true
+    enableAutoEncrypt: true
+    caCert:
+      secretName: ca-key-pair
+      secretKey: tls.crt
+    caKey:
+      secretName: ca-key-pair
+      secretKey: tls.key
+  acls:
+    manageSystemACLs: true
+
+server:
+  storage: 2Gi
+  storageClass: local-path
+
+ui:
+  enabled: true
+  service:
+    type: LoadBalancer
+    loadBalancerIP: "192.168.1.207"
+
+connectInject:
+  enabled: true
+  resources:
+    limits:
+      memory: "800Mi"
+  apiGateway:
+    enabled: true
+    managedGatewayClass:
+      enabled: true
+      serviceType: LoadBalancer
+      service:
+        loadBalancerIP: "192.168.1.210"
+    controller:
+      enabled: true
+      replicas: 1
+
+dns:
+  enabled: true
+  enableRedirection: true
+
+terminatingGateways:
+  enabled: true
+
+tests:
+  enabled: false

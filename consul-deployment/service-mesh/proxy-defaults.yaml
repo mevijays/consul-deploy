@@ -1,0 +1,8 @@
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ProxyDefaults
+metadata:
+  name: global # This name should be global for global otherwise any if namespace mentioned  for that namespace only this config applicable
+spec:
+  config:
+    protocol: http

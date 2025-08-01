@@ -1,0 +1,170 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo2
+  labels:
+    consul.hashicorp.com/connect-inject: "true"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo2-app
+  namespace: demo2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo2-app
+  namespace: demo2
+  labels:
+    app: demo2-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo2-app
+  template:
+    metadata:
+      labels:
+        app: demo2-app
+      annotations:
+        consul.hashicorp.com/connect-inject: "true"
+        consul.hashicorp.com/connect-service: "demo2-app"
+        consul.hashicorp.com/connect-service-port: "80"
+    spec:
+      serviceAccountName: demo2-app
+      containers:
+      - name: demo2-app
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+          name: http
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /usr/share/nginx/html/index.html
+          subPath: index.html
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: demo2-app-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo2-app-config
+  namespace: demo2
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Demo2 App - Consul API Gateway</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; background: #e8f4fd; }
+            .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-left: 4px solid #007bff; }
+            h1 { color: #007bff; }
+            .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+            .success { background: #cce5ff; color: #004085; border: 1px solid #99d6ff; }
+            .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🚀 Demo2 Application</h1>
+            <div class="status success">
+                <strong>Demo2 Success!</strong> You've successfully reached the second demo app through Consul API Gateway!
+            </div>
+            <div class="status info">
+                <strong>Multi-App Setup:</strong> This demonstrates multiple applications using the same API Gateway with different hostnames.
+            </div>
+            <h2>Connection Details:</h2>
+            <ul>
+                <li><strong>Hostname:</strong> apps.consul.local.domain</li>
+                <li><strong>Service:</strong> demo2-app</li>
+                <li><strong>Namespace:</strong> demo2</li>
+                <li><strong>Consul Service Mesh:</strong> ✅ Enabled</li>
+                <li><strong>API Gateway:</strong> ✅ Shared consul-api-gateway</li>
+                <li><strong>Certificate:</strong> ✅ Shared TLS certificate</li>
+            </ul>
+            <h3>Architecture:</h3>
+            <p><strong>demo.consul.local.domain</strong> → Demo App (namespace: app)</p>
+            <p><strong>apps.consul.local.domain</strong> → Demo2 App (namespace: demo2)</p>
+            <p><em>Both applications share the same Consul API Gateway and TLS certificate, demonstrating a multi-tenant setup.</em></p>
+        </div>
+    </body>
+    </html>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo2-app
+  namespace: demo2
+  labels:
+    app: demo2-app
+  annotations:
+    consul.hashicorp.com/service-port: "http"
+spec:
+  selector:
+    app: demo2-app
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+    protocol: TCP
+  type: ClusterIP
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceIntentions
+metadata:
+  name: demo2-app-intentions
+  namespace: demo2
+spec:
+  destination:
+    name: demo2-app
+  sources:
+    - name: consul-api-gateway
+      action: allow
+    - name: "*"
+      action: deny
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: demo2-app-route
+  namespace: demo2
+spec:
+  parentRefs:
+    - name: consul-api-gateway
+      namespace: consul
+      sectionName: https
+  hostnames:
+    - "apps.consul.local.domain"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: demo2-app
+          port: 80
+---
+# HTTP to HTTPS redirect for demo2 app
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: demo2-app-http-redirect
+  namespace: demo2
+spec:
+  parentRefs:
+    - name: consul-api-gateway
+      namespace: consul
+      sectionName: http
+  hostnames:
+    - "apps.consul.local.domain"
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301

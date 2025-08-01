@@ -1,0 +1,18 @@
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: consul-api-gateway-tls
+  namespace: consul
+spec:
+  secretName: consul-api-gateway-tls
+  issuerRef:
+    name: ca-issuer
+    kind: ClusterIssuer
+  commonName: api.consul.local.domain # this is important to have a valid common name
+  dnsNames:
+  - "api.consul.local.domain"
+  - "apps.consul.local.domain"
+  - "demo.consul.local.domain"
+  - "ui.consul.local.domain"
+  - "v1.consul.local.domain"

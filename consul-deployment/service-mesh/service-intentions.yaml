@@ -1,0 +1,14 @@
+
+# Intentions for consul-api-gateway in the consul namespace:
+# - Allow all sources to access the API gateway
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceIntentions
+metadata:
+  name: api-gateway-intentions
+  namespace: consul
+spec:
+  destination:
+    name: consul-api-gateway
+  sources:
+    - name: "*"
+      action: allow

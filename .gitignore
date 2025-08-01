@@ -1,0 +1,40 @@
+# RKE and Kubernetes
+kube_config_*.yml
+cluster.rkestate
+.rke/
+.rancher/
+
+# Helm
+*.tgz
+charts/
+
+# Kubernetes secrets and sensitive files
+*.key
+*.crt
+*.pem
+*.enc
+*.secret.yaml
+*.secrets.yaml
+secrets/
+
+# Ansible
+*.retry
+*.vault
+
+# VSCode
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+.env
+.env.*

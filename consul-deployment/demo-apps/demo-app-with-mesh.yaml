@@ -1,0 +1,146 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app
+  labels:
+    consul.hashicorp.com/connect-inject: "true"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo-app
+  namespace: app
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  namespace: app
+  labels:
+    app: demo-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    metadata:
+      labels:
+        app: demo-app
+      annotations:
+        consul.hashicorp.com/connect-inject: "true"
+        consul.hashicorp.com/connect-service: "demo-app"
+        consul.hashicorp.com/connect-service-port: "80"
+    spec:
+      serviceAccountName: demo-app
+      containers:
+      - name: demo-app
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+          name: http
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /usr/share/nginx/html/index.html
+          subPath: index.html
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: demo-app-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-app-config
+  namespace: app
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Demo App - Consul API Gateway</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; background: #f4f4f4; }
+            .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            h1 { color: #333; }
+            .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+            .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎉 Demo Application</h1>
+            <div class="status success">
+                <strong>Success!</strong> You've successfully reached the demo app through Consul API Gateway!
+            </div>
+            <h2>Connection Details:</h2>
+            <ul>
+                <li><strong>Hostname:</strong> demo.consul.local.domain</li>
+                <li><strong>Service:</strong> demo-app</li>
+                <li><strong>Namespace:</strong> app</li>
+                <li><strong>Consul Service Mesh:</strong> ✅ Enabled</li>
+                <li><strong>API Gateway:</strong> ✅ Consul API Gateway</li>
+            </ul>
+            <p><em>This application is running with Consul service mesh injection and is accessible through the Consul API Gateway.</em></p>
+        </div>
+    </body>
+    </html>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app
+  namespace: app
+  labels:
+    app: demo-app
+  annotations:
+    consul.hashicorp.com/service-port: "http"
+spec:
+  selector:
+    app: demo-app
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+    protocol: TCP
+  type: ClusterIP
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: demo-app-route
+  namespace: app
+spec:
+  parentRefs:
+    - name: consul-api-gateway
+      namespace: consul
+      sectionName: https
+  hostnames:
+    - "demo.consul.local.domain"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: demo-app
+          port: 80
+---
+# Intentions for demo-app in the app namespace:
+# - Allow traffic from consul-api-gateway
+# - Deny all other sources
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceIntentions
+metadata:
+  name: demo-app-intentions
+  namespace: app
+spec:
+  destination:
+    name: demo-app
+  sources:
+    - name: consul-api-gateway
+      action: allow
+    - name: "*"
+      action: deny
+---

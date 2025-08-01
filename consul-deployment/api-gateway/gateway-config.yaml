@@ -1,0 +1,29 @@
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: consul-api-gateway
+  namespace: consul
+  annotations:
+    cert-manager.io/cluster-issuer: "ca-issuer"
+    consul.hashicorp.com/service-load-balancer-ip: "192.168.1.210"
+spec:
+  gatewayClassName: consul
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: consul-api-gateway-tls
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: All
