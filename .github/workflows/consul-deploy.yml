@@ -1,0 +1,87 @@
+name: Consul Full Deployment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Set up Kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG_DATA }}
+
+      - name: Deploy cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.18.2/cert-manager.yaml
+          kubectl rollout status deployment/cert-manager -n cert-manager --timeout=180s
+
+      - name: Deploy MetalLB
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.15.2/config/manifests/metallb-native.yaml
+          kubectl rollout status deployment/controller -n metallb-system --timeout=180s
+          kubectl rollout status daemonset/speaker -n metallb-system --timeout=180s
+
+      - name: Apply MetalLB IP pool and L2Advertisement
+        run: |
+          kubectl apply -f metallb/apply.yaml
+
+      - name: Deploy local-path-provisioner
+        run: |
+          kubectl apply -f consul-deployment/storage/local-path-provisioner.yaml
+          kubectl rollout status deployment/local-path-provisioner -n local-path-storage --timeout=180s
+
+      - name: Deploy cert-manager config (issuers, CA)
+        run: |
+          kubectl apply -f consul-deployment/certificates/cert-manager-config.yaml
+          kubectl get clusterissuer
+          kubectl get cert -A
+
+      - name: Copy CA secret to consul namespace
+        run: |
+          kubectl get secret ca-key-pair -n cert-manager -o yaml | sed 's/namespace: cert-manager/namespace: consul/' | kubectl apply -f -
+
+      - name: Deploy Consul via Helm
+        run: |
+          helm repo add hashicorp https://helm.releases.hashicorp.com
+          helm repo update
+          helm upgrade --install consul hashicorp/consul --values consul-deployment/helm-values/consul-values.yaml -n consul --create-namespace
+
+      - name: Deploy API Gateway certificate
+        run: |
+          kubectl apply -f consul-deployment/certificates/api-gateway-cert.yaml
+          kubectl get cert -n consul
+
+      - name: Deploy API Gateway
+        run: |
+          kubectl apply -f consul-deployment/api-gateway/gateway-config.yaml
+
+      - name: Deploy Proxy Defaults
+        run: |
+          kubectl apply -f consul-deployment/service-mesh/proxy-defaults.yaml
+
+      - name: Deploy Service Intentions
+        run: |
+          kubectl apply -f consul-deployment/service-mesh/service-intentions.yaml
+
+      - name: Deploy Demo Applications
+        run: |
+          kubectl apply -f consul-deployment/demo-apps/demo-app-with-mesh.yaml
+          kubectl apply -f consul-deployment/demo-apps/demo2-app-with-mesh.yaml
+
+      - name: Show Consul status
+        run: |
+          kubectl get pods -n consul
+          kubectl get svc -n consul
+          kubectl get gateway -n consul
